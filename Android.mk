@@ -14,6 +14,8 @@
 
 LOCAL_PATH:= $(call my-dir)
 
+ifneq ($(BUILD_GONK_DISABLE),1)
+
 ifneq ($(TARGET_PROVIDES_B2G_INIT_RC),true)
 include $(CLEAR_VARS)
 LOCAL_MODULE       := init.rc
@@ -157,3 +159,5 @@ $(LOCAL_BUILT_MODULE): $(TARGET_CRTBEGIN_DYNAMIC_O) $(TARGET_CRTEND_O) $(addpref
 	rm -f $(GECKO_OBJDIR)/dist/b2g-*.tar.gz && \
 	$(MAKE) -C $(GECKO_OBJDIR) package && \
 	mkdir -p $(@D) && cp $(GECKO_OBJDIR)/dist/b2g-*.tar.gz $@
+
+endif #BUILD_GONK_DISABLE
