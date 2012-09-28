@@ -31,7 +31,6 @@ $(LOCAL_BUILT_MODULE):
 	patch $@ gonk-misc/init.rc.patch
 endif
 
-
 include $(CLEAR_VARS)
 LOCAL_MODULE       := init.b2g.rc
 LOCAL_MODULE_TAGS  := optional eng
@@ -62,6 +61,28 @@ LOCAL_MODULE_TAGS  := optional eng
 LOCAL_MODULE_CLASS := EXECUTABLES
 LOCAL_SRC_FILES    := fakeperm.cpp
 LOCAL_SHARED_LIBRARIES := libbinder libutils
+include $(BUILD_EXECUTABLE)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE       := b2g-ps
+LOCAL_MODULE_TAGS  := optional eng
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_SRC_FILES    := b2g-ps
+include $(BUILD_PREBUILT)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE       := b2g-procrank
+LOCAL_MODULE_TAGS  := optional eng
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_SRC_FILES    := b2g-procrank
+include $(BUILD_PREBUILT)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE       := killer
+LOCAL_MODULE_TAGS  := optional eng
+LOCAL_MODULE_CLASS := EXECUTABLES
+LOCAL_SRC_FILES    := killer.cpp
+LOCAL_SHARED_LIBRARIES :=
 include $(BUILD_EXECUTABLE)
 
 $(OUT_DOCS)/api-stubs-timestamp:
@@ -113,19 +134,58 @@ LOCAL_MODULE_TAGS := optional eng
 LOCAL_MODULE_PATH := $(TARGET_OUT)
 include $(BUILD_PREBUILT)
 
-$(LOCAL_INSTALLED_MODULE):
+PRESERVE_B2G_WEBAPPS := 0
+# In user (production) builds, gaia goes in $(TARGET_OUT)/b2g/webapps
+# This flag helps us preserve the directory when cleaning out $(TARGET_OUT)/b2g
+ifneq ($(filter user userdebug, $(TARGET_BUILD_VARIANT)),)
+PRESERVE_B2G_WEBAPPS := 1
+B2G_UPDATER ?= 1
+else
+B2G_UPDATER ?= 0
+endif
+
+$(LOCAL_INSTALLED_MODULE): $(LOCAL_BUILT_MODULE) gaia/profile.tar.gz
 	@echo Install dir: $(TARGET_OUT)/b2g
+
+ifeq ($(PRESERVE_B2G_WEBAPPS), 1)
+	mv $(TARGET_OUT)/b2g/webapps $(TARGET_OUT)
+endif
+
 	rm -rf $(TARGET_OUT)/b2g
+	mkdir -p $(TARGET_OUT)/b2g
+
+ifeq ($(PRESERVE_B2G_WEBAPPS), 1)
+	mv $(TARGET_OUT)/webapps $(TARGET_OUT)/b2g
+endif
+
+	mkdir -p $(TARGET_OUT)/b2g/defaults/pref
+# rename user_pref() to pref() in user.js
+	sed s/user_pref\(/pref\(/ $(GAIA_PATH)/profile/user.js > $(TARGET_OUT)/b2g/defaults/pref/user.js
 	cd $(TARGET_OUT) && tar xvfz $(abspath $<)
 
 # Target to create Gecko update package (MAR)
-UPDATE_PACKAGE_TARGET := $(GECKO_OBJDIR)/dist/b2g/b2g-gecko-update.mar
+DIST_B2G_UPDATE_DIR := $(GECKO_OBJDIR)/dist/b2g-update
+UPDATE_PACKAGE_TARGET := $(DIST_B2G_UPDATE_DIR)/b2g-gecko-update.mar
 MAR := $(GECKO_OBJDIR)/dist/host/bin/mar
 MAKE_FULL_UPDATE := $(GECKO_PATH)/tools/update-packaging/make_full_update.sh
+
+# Floating point operations hardware support
+ARCH_ARM_VFP := toolchain-default
+ifeq ($(ARCH_ARM_HAVE_VFP), true)
+ARCH_ARM_VFP := vfp
+endif
+ifeq ($(ARCH_ARM_HAVE_VFP_D32), true)
+ARCH_ARM_VFP := vfpv3
+endif
+ifeq ($(ARCH_ARM_HAVE_NEON), true)
+ARCH_ARM_VFP := neon
+endif
+
 .PHONY: gecko-update-full
 gecko-update-full:
-	MAR=$(MAR) $(MAKE_FULL_UPDATE) $(UPDATE_PACKAGE_TARGET) $(GECKO_OBJDIR)/dist/b2g
-	sha512sum $(UPDATE_PACKAGE_TARGET)
+	mkdir -p $(DIST_B2G_UPDATE_DIR)
+	MAR=$(MAR) $(MAKE_FULL_UPDATE) $(UPDATE_PACKAGE_TARGET) $(TARGET_OUT)/b2g
+	shasum -a 512 $(UPDATE_PACKAGE_TARGET)
 
 GECKO_MAKE_FLAGS ?= -j16
 GECKO_LIB_DEPS := \
@@ -142,6 +202,9 @@ GECKO_LIB_DEPS := \
 
 .PHONY: $(LOCAL_BUILT_MODULE)
 $(LOCAL_BUILT_MODULE): $(TARGET_CRTBEGIN_DYNAMIC_O) $(TARGET_CRTEND_O) $(addprefix $(TARGET_OUT_SHARED_LIBRARIES)/,$(GECKO_LIB_DEPS))
+	(echo "export GECKO_OBJDIR=$(abspath $(GECKO_OBJDIR))"; \
+	echo "export TARGET_TOOLS_PREFIX=$(abspath $(TARGET_TOOLS_PREFIX))"; \
+	echo "export PRODUCT_OUT=$(abspath $(PRODUCT_OUT))" ) > .var.profile
 	export CONFIGURE_ARGS="$(GECKO_CONFIGURE_ARGS)" && \
 	export GONK_PRODUCT="$(TARGET_DEVICE)" && \
 	export TARGET_ARCH="$(TARGET_ARCH)" && \
@@ -154,6 +217,8 @@ $(LOCAL_BUILT_MODULE): $(TARGET_CRTBEGIN_DYNAMIC_O) $(TARGET_CRTEND_O) $(addpref
 	export MOZCONFIG="$(abspath $(MOZCONFIG_PATH))" && \
 	export EXTRA_INCLUDE="-include $(UNICODE_HEADER_PATH)" && \
 	export DISABLE_JEMALLOC="$(DISABLE_JEMALLOC)" && \
+	export B2G_UPDATER="$(B2G_UPDATER)" && \
+	export ARCH_ARM_VFP="$(ARCH_ARM_VFP)" && \
 	echo $(MAKE) -C $(GECKO_PATH) -f client.mk -s && \
 	$(MAKE) -C $(GECKO_PATH) -f client.mk -s && \
 	rm -f $(GECKO_OBJDIR)/dist/b2g-*.tar.gz && \
